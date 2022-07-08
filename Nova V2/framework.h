@@ -20,13 +20,22 @@ static UWorld* GetWorld()
 }
 
 template <typename T>
-static T* NewObject(UObject* Outer = nullptr)
+static T* GetStaticObject()
 {
-	return (T*)((UGameplayStatics*)UGameplayStatics::StaticClass())->STATIC_SpawnObject(T::StaticClass(), Outer);
+	return (T*)T::StaticClass();
+}
+
+template <typename T>
+static T* NewObject(UObject* Outer = nullptr, UClass* Class = T::StaticClass())
+{
+	return (T*)GetStaticObject<UGameplayStatics>()->STATIC_SpawnObject(Class, Outer);
 }
 
 #define UE_LOG(log, msg, ...) std::cout << #log << ": " << std::format(msg,  ##__VA_ARGS__) << std::endl
 #define UE_CLOG(check, fatal, log, msg, ...) if (check) { UE_LOG(log, msg, __VA_ARGS__); if (fatal) { exit(0); } }
+
+#define CREATE_HOOK(target, detour, og) MH_CreateHook((void*)target, detour, (void**)og); MH_EnableHook((void*)target)
+
 //#define NOLOGGING
 
 // Our codes

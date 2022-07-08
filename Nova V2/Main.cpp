@@ -3,7 +3,8 @@
 static void Main()
 {
     AllocConsole();
-    freopen("CONOUT$", "w", stdout);
+    FILE* f;
+    freopen_s(&f, "CONOUT$", "w", stdout);
 
     Util::Init();
 
@@ -25,12 +26,11 @@ static void Main()
     UE_LOG(LogNova, "GEngine: {}", GEngine->GetFullName());
     UE_LOG(LogNova, "World: {}", GetWorld()->GetFullName());
 
-    // "fix"
-    /**reinterpret_cast<char*>(BaseAddr + 0xAEC475 + 0) = 0xE9;
+    *reinterpret_cast<char*>(BaseAddr + 0xAEC475 + 0) = 0xE9;
     *reinterpret_cast<char*>(BaseAddr + 0xAEC475 + 1) = 0x39;
     *reinterpret_cast<char*>(BaseAddr + 0xAEC475 + 2) = 0x02;
     *reinterpret_cast<char*>(BaseAddr + 0xAEC475 + 3) = 0x00;
-    *reinterpret_cast<char*>(BaseAddr + 0xAEC475 + 4) = 0x00;*/
+    *reinterpret_cast<char*>(BaseAddr + 0xAEC475 + 4) = 0x00;
 
     GEngine->GameInstance->LocalPlayers[0]->PlayerController->SwitchLevel(L"Athena_Terrain?game=athena");
 

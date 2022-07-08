@@ -14,7 +14,20 @@ namespace Hooks
 		
 		auto FuncName = Function->GetName();
 
-		if (FuncName.contains("ServerExecuteInventoryItem"))
+		if (GetKeyState(VK_F7) & 1)
+		{
+			bool bStarted = false;
+
+			if (!bStarted)
+			{
+				bStarted = true;
+
+				auto EventPlayer = UObject::FindObject<ULevelSequencePlayer>("LevelSequencePlayer Athena_Gameplay_Geode.Athena_Gameplay_Geode.PersistentLevel.LevelSequence_LaunchRocket.AnimationPlayer");
+				EventPlayer->Play();
+			}
+		}
+
+		if (FuncName == "ServerExecuteInventoryItem")
 		{
 			auto ItemGuid = ((AFortPlayerController_ServerExecuteInventoryItem_Params*)Params)->ItemGuid;
 			auto PlayerController = (AFortPlayerController*)Object;
@@ -28,23 +41,67 @@ namespace Hooks
 					if (auto Pawn = (AFortPlayerPawn*)PlayerController->Pawn)
 					{
 						auto Weap = Pawn->EquipWeaponDefinition((UFortWeaponItemDefinition*)ItemInstance->GetItemDefinitionBP(), ItemGuid);
+						Weap->AmmoCount = 999;
+						Weap->ClientGivenTo(Pawn);
+						Pawn->ClientInternalEquipWeapon(Weap);
 					}
 				}
 			}
 		}
 
-		if (FuncName.contains("ServerTryActivateAbility"))
+		if (FuncName == "ServerTryActivateAbility")
 		{
 			auto AbilitySystemComponent = (UAbilitySystemComponent*)Object;
 			auto CurrentParams = (UAbilitySystemComponent_ServerTryActivateAbility_Params*)Params;
 
-			auto EventData = FuncName.contains("WithEventData") ? &(((UAbilitySystemComponent_ServerTryActivateAbilityWithEventData_Params*)Params))->TriggerEventData : nullptr;
-
 			UGameplayAbility* InstancedAbility;
-			Abilities::InternalTryActivateAbility(AbilitySystemComponent, CurrentParams->AbilityToActivate, CurrentParams->PredictionKey, &InstancedAbility, nullptr, EventData);
+			Abilities::InternalTryActivateAbility(AbilitySystemComponent, CurrentParams->AbilityToActivate, CurrentParams->PredictionKey, &InstancedAbility, nullptr, nullptr);
 		}
 
-		if (FuncName.contains("ServerAbilityRPCBatch"))
+		if (FuncName == "ServerCreateBuildingActor")
+		{
+			auto CurrentParams = (AFortPlayerController_ServerCreateBuildingActor_Params*)Params;
+			auto PlayerController = (AFortPlayerController*)Object;
+
+			if (CurrentParams->BuildingClassData.BuildingClass)
+			{
+				auto BuildingActor = GetWorld()->SpawnActor<ABuildingActor>(CurrentParams->BuildLoc, CurrentParams->BuildRot, CurrentParams->BuildingClassData.BuildingClass);
+				BuildingActor->InitializeKismetSpawnedBuildingActor(BuildingActor, PlayerController);
+				BuildingActor->Team = ((AFortPlayerStateAthena*)PlayerController->PlayerState)->TeamIndex;
+				BuildingActor->OnRep_Team();
+			}
+		}
+
+		if (FuncName == "ServerTryActivateAbilityWithEventData")
+		{
+			auto AbilitySystemComponent = (UAbilitySystemComponent*)Object;
+			auto CurrentParams = (UAbilitySystemComponent_ServerTryActivateAbilityWithEventData_Params*)Params;
+
+			UGameplayAbility* InstancedAbility;
+			Abilities::InternalTryActivateAbility(AbilitySystemComponent, CurrentParams->AbilityToActivate, CurrentParams->PredictionKey, &InstancedAbility, nullptr, &CurrentParams->TriggerEventData);
+		}
+		
+		if (FuncName == "ServerAttemptAircraftJump")
+		{
+			auto CurrentParams = (AFortPlayerControllerAthena_ServerAttemptAircraftJump_Params*)Params;
+			auto PlayerController = (AFortPlayerControllerAthena*)Object;
+			
+			if (PlayerController->Pawn)
+				return ProcessEvent(Object, Function, Params);
+
+			auto GameState = (AAthena_GameState_C*)GetWorld()->GameState;
+			auto Aircraft = GameState->GetAircraft(0);
+
+			if (!Aircraft)
+				return ProcessEvent(Object, Function, Params);
+
+			auto Pawn = GetWorld()->SpawnActor<APlayerPawn_Athena_C>(Aircraft->K2_GetActorLocation(), {});
+			PlayerController->Possess(Pawn);
+
+			PlayerController->SetControlRotation(CurrentParams->ClientRotation);
+		}
+
+		if (FuncName == "ServerAbilityRPCBatch")
 		{
 			auto AbilitySystemComponent = (UAbilitySystemComponent*)Object;
 			auto CurrentParams = (UAbilitySystemComponent_ServerAbilityRPCBatch_Params*)Params;
@@ -53,7 +110,7 @@ namespace Hooks
 			Abilities::InternalTryActivateAbility(AbilitySystemComponent, CurrentParams->BatchInfo.AbilitySpecHandle, CurrentParams->BatchInfo.PredictionKey, &InstancedAbility, nullptr, nullptr);
 		}
 
-		if (FuncName.contains("ReadyToStartMatch"))
+		if (FuncName == "ReadyToStartMatch")
 		{
 			static bool bInit = false;
 
@@ -63,10 +120,15 @@ namespace Hooks
 
 				Net::Init();
 
+				NewObject<UCheatManager>(GEngine->GameInstance->LocalPlayers[0]->PlayerController)->DestroyAll(AAthena_PlayerController_C::StaticClass());
+
 				auto GameState = (AAthena_GameState_C*)GetWorld()->GameState;
 				
-				GameState->GamePhase = EAthenaGamePhase::Warmup;
-				GameState->OnRep_GamePhase(EAthenaGamePhase::Setup);
+				GameState->CurrentPlaylistData = Util::FindObjectFast<UFortPlaylistAthena>("/Game/Athena/Playlists/Playground/Playlist_Playground.Playlist_Playground");
+				GameState->OnRep_CurrentPlaylistData();
+
+				GameState->GamePhase = EAthenaGamePhase::None;
+				GameState->OnRep_GamePhase(EAthenaGamePhase::None);
 
 				auto GameMode = (AAthena_GameMode_C*)GetWorld()->AuthorityGameMode;
 
@@ -87,6 +149,8 @@ namespace Hooks
 				auto PlayerState = (AFortPlayerStateAthena*)PlayerController->PlayerState;
 				auto Pawn = (APlayerPawn_Athena_C*)GetWorld()->SpawnActor<APlayerPawn_Athena_C>({0, 0, 5000}, {});
 
+				Pawn->bAlwaysRelevant = true;
+
 				PlayerController->Possess(Pawn);
 
 				PlayerController->bHasClientFinishedLoading = true;
@@ -101,6 +165,12 @@ namespace Hooks
 				PlayerController->QuickBars->SetOwner(PlayerController);
 				PlayerController->QuickBars->OnRep_Owner();
 
+				PlayerController->OverriddenBackpackSize = 5;
+
+				PlayerState->CharacterParts[0] = Util::FindObjectFast<UCustomCharacterPart>("/Game/Characters/CharacterParts/Female/Medium/Heads/F_Med_Head1.F_Med_Head1");
+				PlayerState->CharacterParts[1] = Util::FindObjectFast<UCustomCharacterPart>("/Game/Characters/CharacterParts/Female/Medium/Bodies/F_Med_Soldier_01.F_Med_Soldier_01");
+				PlayerState->OnRep_CharacterParts();
+
 				Inventory::InitForPlayer(PlayerController);
 
 				auto AbilitySet = Util::FindObjectFast<UFortAbilitySet>("/Game/Abilities/Player/Generic/Traits/DefaultPlayer/GAS_DefaultPlayer.GAS_DefaultPlayer");
@@ -109,6 +179,9 @@ namespace Hooks
 					Util::GrantAbility(Pawn, AbilitySet->GameplayAbilities[i]);
 
 				Util::GrantAbility(Pawn, Util::FindObjectFast<UClass>("/Game/Abilities/Weapons/Ranged/GA_Ranged_GenericDamage.GA_Ranged_GenericDamage_C"));
+
+				Pawn->ForceNetUpdate();
+				PlayerController->ForceNetUpdate();
 			}
 		}
 
@@ -124,6 +197,8 @@ namespace Hooks
 	{
 		if (NetDriver->ReplicationDriver)
 			Net::ServerReplicateActors(NetDriver->ReplicationDriver);
+		else
+			UE_LOG(LogNet, "ReplicationDriver is null!");
 
 		return TickFlush(NetDriver);
 	}
@@ -135,14 +210,11 @@ namespace Hooks
 		auto KickPlayerAddr = BaseAddr + 0x216DEA0;
 		auto ProcessEventAddr = BaseAddr + 0x158FB20;
 		auto TickFlushAddr = BaseAddr + 0x2299FF0;
+		auto CreateReplicationDriverAddr = BaseAddr + 0x2284200;
 
-		MH_CreateHook((void*)ProcessEventAddr, ProcessEventHook, (void**)&ProcessEvent);
-		MH_EnableHook((void*)ProcessEventAddr);
-		MH_CreateHook((void*)SetClientLoginStateAddr, SetClientLoginStateHook, (void**)&SetClientLoginState);
-		MH_EnableHook((void*)SetClientLoginStateAddr);
-		MH_CreateHook((void*)KickPlayerAddr, KickPlayerHook, nullptr);
-		MH_EnableHook((void*)KickPlayerAddr);
-		MH_CreateHook((void*)TickFlushAddr, TickFlushHook, (void**)&TickFlush);
-		MH_EnableHook((void*)TickFlushAddr);
+		CREATE_HOOK(ProcessEventAddr, ProcessEventHook, &ProcessEvent);
+		CREATE_HOOK(SetClientLoginStateAddr, SetClientLoginStateHook, &SetClientLoginState);
+		CREATE_HOOK(KickPlayerAddr, KickPlayerHook, nullptr);
+		CREATE_HOOK(TickFlushAddr, TickFlushHook, &TickFlush);
 	}
 }
